@@ -453,7 +453,7 @@ with tab2:
                     display_text="🔗 보기",
                 ),
             },
-            width='stretch',
+            use_container_width=True,
             height=450,
         )
 
