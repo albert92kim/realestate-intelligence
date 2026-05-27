@@ -1,0 +1,30 @@
+# 환경 설정 (절대 커밋 금지)
+.env
+.env.*
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# 로컬 전용 디렉토리
+logs/
+exports/
+
+# 데이터 파일: data/*.db 는 커밋 대상 (동기화용)
+# data/ 는 gitignore 하지 않음
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
