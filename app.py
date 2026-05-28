@@ -150,11 +150,17 @@ def build_kakao_map(df, kakao_js_key,
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{font-family:'Malgun Gothic',sans-serif}}
 #map{{width:100%;height:580px}}
+#dbg{{position:fixed;top:4px;left:4px;background:rgba(0,0,0,.7);color:#0f0;font-size:11px;padding:4px 8px;border-radius:4px;z-index:9999;font-family:monospace}}
 </style>
 </head><body>
+<div id="dbg">초기화 중...</div>
 <div id="map"></div>
 <script>
+var dbg=document.getElementById('dbg');
+window.onerror=function(m,s,l,c,e){{dbg.style.color='#f66';dbg.textContent='ERR: '+m+' ('+s.split('/').pop()+':'+l+')';return false;}};
 (function(){{
+try{{
+dbg.textContent='kakao='+(typeof kakao)+' | loc='+document.location.href.slice(0,40);
 var map=new kakao.maps.Map(document.getElementById('map'),{{
   center:new kakao.maps.LatLng({center_lat},{center_lon}),level:5}});
 map.addControl(new kakao.maps.ZoomControl(),kakao.maps.ControlPosition.RIGHT);
@@ -267,6 +273,8 @@ if({subway_js}){{
     sort:kakao.maps.services.SortBy.DISTANCE
   }});
 }}
+dbg.textContent='지도 렌더링 완료 ✓';
+}}catch(e){{dbg.style.color='#f66';dbg.textContent='CATCH: '+e.message;}}
 }})();
 </script>
 </body></html>"""
