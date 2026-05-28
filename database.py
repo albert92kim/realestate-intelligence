@@ -84,10 +84,18 @@ def init_db():
             duration_sec  REAL
         );
 
+        CREATE TABLE IF NOT EXISTS watchlist (
+            article_no  TEXT PRIMARY KEY,
+            memo        TEXT DEFAULT '',
+            added_at    TEXT NOT NULL,
+            updated_at  TEXT NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_properties_cortar ON properties(cortar_no);
         CREATE INDEX IF NOT EXISTS idx_properties_active ON properties(is_active);
         CREATE INDEX IF NOT EXISTS idx_price_history_no ON price_history(article_no);
         CREATE INDEX IF NOT EXISTS idx_market_stats_date ON market_stats(stat_date, cortar_no);
+        CREATE INDEX IF NOT EXISTS idx_watchlist_no ON watchlist(article_no);
         """)
     print("DB 초기화 완료:", DB_PATH)
 
@@ -267,6 +275,55 @@ def log_run(search_json, total, new_cnt, updated_cnt, deleted_cnt, status, error
             VALUES (?,?,?,?,?,?,?,?,?)
         """, (datetime.now().isoformat(), json.dumps(search_json, ensure_ascii=False),
               total, new_cnt, updated_cnt, deleted_cnt, status, error_msg, duration))
+
+
+# ── 관심 매물 CRUD ─────────────────────────────────────
+
+def get_watched_nos() -> set:
+    with get_conn() as conn:
+        rows = conn.execute("SELECT article_no FROM watchlist").fetchall()
+    return {r[0] for r in rows}
+
+
+def get_watchlist_df():
+    import pandas as _pd
+    with get_conn() as conn:
+        cur = conn.execute("""
+            SELECT w.article_no, w.memo, w.added_at, w.updated_at,
+                   p.type_name, p.trade_name, p.price_raw, p.price_int,
+                   p.area2, p.floor_info, p.build_year, p.description,
+                   p.latitude, p.longitude, p.building_name, p.realtor_name,
+                   p.article_url, p.is_active, p.first_seen, p.cortar_address, p.direction
+            FROM watchlist w
+            LEFT JOIN properties p ON w.article_no = p.article_no
+            ORDER BY w.added_at DESC
+        """)
+        cols = [d[0] for d in cur.description]
+        rows = cur.fetchall()
+    return _pd.DataFrame(rows, columns=cols) if rows else _pd.DataFrame()
+
+
+def add_to_watchlist(article_no: str, memo: str = "") -> None:
+    now = datetime.now().isoformat()
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT OR IGNORE INTO watchlist (article_no, memo, added_at, updated_at)
+            VALUES (?, ?, ?, ?)
+        """, (article_no, memo, now, now))
+
+
+def remove_from_watchlist(article_no: str) -> None:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM watchlist WHERE article_no=?", (article_no,))
+
+
+def update_watchlist_memo(article_no: str, memo: str) -> None:
+    now = datetime.now().isoformat()
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE watchlist SET memo=?, updated_at=? WHERE article_no=?",
+            (memo, now, article_no)
+        )
 
 
 if __name__ == "__main__":

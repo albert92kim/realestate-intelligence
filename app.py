@@ -30,7 +30,8 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from database import get_conn, init_db
+from database import (get_conn, init_db, get_watched_nos, get_watchlist_df,
+                      add_to_watchlist, remove_from_watchlist, update_watchlist_memo)
 from config import SEARCH_CONFIGS, KAKAO_JS_KEY
 
 st.set_page_config(
@@ -103,8 +104,11 @@ def load_price_history(article_no):
 # ── 카카오 지도 HTML 빌더 ─────────────────────────────
 def build_kakao_map(df, kakao_js_key,
                     center_lat, center_lon, avg_price,
-                    show_bargain=True, use_cluster=True, show_subway=True):
+                    show_bargain=True, use_cluster=True, show_subway=True,
+                    watched_nos=None):
     import json as _json
+    if watched_nos is None:
+        watched_nos = set()
 
     props = []
     for _, row in df.iterrows():
@@ -129,13 +133,21 @@ def build_kakao_map(df, kakao_js_key,
         def _s(v): return str(v) if v is not None and str(v) != "nan" else ""
         props.append({
             "lat": lat, "lon": lon,
+            "no": _s(row.get("article_no")),
             "price": _s(row.get("price_raw")),
             "area2": _s(row.get("area2")),
+            "area1": _s(row.get("area1")),
             "floor": _s(row.get("floor_info")),
+            "direction": _s(row.get("direction")),
             "type_name": _s(row.get("type_name")),
             "trade_name": _s(row.get("trade_name")),
-            "desc": _s(row.get("description"))[:50],
+            "building": _s(row.get("building_name")),
+            "build_year": _s(row.get("build_year")),
+            "realtor": _s(row.get("realtor_name")),
+            "desc": _s(row.get("description")),
+            "article_url": _s(row.get("article_url")),
             "color": color, "label": label,
+            "watched": row.get("article_no") in watched_nos,
         })
 
     props_json = _json.dumps(props, ensure_ascii=False)
@@ -178,28 +190,51 @@ function makeSVG(color,label){{
     +'</svg>';
   return 'data:image/svg+xml;charset=UTF-8,'+encodeURIComponent(s);
 }}
+function makeStarSVG(){{
+  var s='<svg xmlns="http://www.w3.org/2000/svg" width="34" height="34">'
+    +'<polygon points="17,2 21,13 33,13 23,20 27,32 17,25 7,32 11,20 1,13 13,13" '
+    +'fill="#FFD700" stroke="white" stroke-width="1.5"/>'
+    +'</svg>';
+  return 'data:image/svg+xml;charset=UTF-8,'+encodeURIComponent(s);
+}}
 
 // ── 매물 마커 ──────────────────────────────────────────
 var props={props_json};
 var markers=[];
 props.forEach(function(p){{
   var pos=new kakao.maps.LatLng(p.lat,p.lon);
+  var imgSrc=p.watched?makeStarSVG():makeSVG(p.color,p.label);
+  var mSz=p.watched?34:28, mAn=p.watched?17:14;
   var marker=new kakao.maps.Marker({{
     position:pos,
-    image:new kakao.maps.MarkerImage(makeSVG(p.color,p.label),
-      new kakao.maps.Size(28,28),{{offset:new kakao.maps.Point(14,14)}})
+    image:new kakao.maps.MarkerImage(imgSrc,
+      new kakao.maps.Size(mSz,mSz),{{offset:new kakao.maps.Point(mAn,mAn)}})
   }});
   // 팝업 래퍼: 정보 패널 + 아래 화살표 + 스페이서(마커 높이만큼)
   var wrap=document.createElement('div');
   wrap.style.cssText='display:inline-block;text-align:center';
 
   var d=document.createElement('div');
-  d.style.cssText='background:white;border:1px solid #ddd;border-radius:8px;padding:10px 14px 10px 12px;font-size:12px;line-height:1.7;box-shadow:0 2px 8px rgba(0,0,0,.15);min-width:160px;max-width:230px;position:relative;text-align:left';
-  d.innerHTML='<span style="position:absolute;top:4px;right:8px;cursor:pointer;font-size:16px;color:#aaa" onclick="(function(e){{e.stopPropagation();if(window._kOpen){{window._kOpen.setMap(null);window._kOpen=null;}}}})()">×</span>'
-    +'<b style="font-size:13px">'+p.type_name+' '+p.trade_name+'</b><br>'
-    +'<span style="color:#e74c3c;font-weight:bold;font-size:14px">'+p.price+'</span><br>'
-    +'<span style="color:#555">면적 '+p.area2+'m² &nbsp; 층 '+p.floor+'</span>'
-    +(p.desc?'<br><span style="color:#777;font-size:11px">'+p.desc+'</span>':'');
+  d.style.cssText='background:white;border:1px solid #ddd;border-radius:8px;padding:10px 14px 10px 12px;font-size:12px;line-height:1.7;box-shadow:0 2px 8px rgba(0,0,0,.15);min-width:220px;max-width:290px;position:relative;text-align:left';
+  var nUrl=p.article_url||('https://new.land.naver.com/houses?articleNo='+p.no);
+  d.innerHTML=
+    (p.watched?'<div style="background:#FFD700;color:#5a4000;border-radius:3px;padding:1px 6px;font-size:10px;margin-bottom:4px;display:inline-block;font-weight:bold">⭐ 관심 매물</div><br>':'')
+    +'<span style="position:absolute;top:4px;right:8px;cursor:pointer;font-size:16px;color:#aaa" onclick="(function(e){{e.stopPropagation();if(window._kOpen){{window._kOpen.setMap(null);window._kOpen=null;}}}})()">×</span>'
+    +(p.building?'<b style="font-size:13px">'+p.building+'</b><br>':'')
+    +'<span style="color:#888;font-size:11px">'+p.type_name+' · '+p.trade_name+'</span><br>'
+    +'<span style="color:#e74c3c;font-weight:bold;font-size:15px">'+p.price+'</span>'
+    +'<hr style="margin:5px 0;border:none;border-top:1px solid #eee">'
+    +'<span style="color:#555;font-size:11px">'
+    +(p.area2?'📐 '+p.area2+'m²':'')
+    +(p.floor?' &nbsp;🏢 '+p.floor+'층':'')
+    +(p.direction?' &nbsp;↗ '+p.direction:'')
+    +'</span>'
+    +(p.build_year?'<br><span style="color:#777;font-size:11px">🔨 '+p.build_year+'년 건축</span>':'')
+    +(p.realtor?'<br><span style="color:#aaa;font-size:10px">🏪 '+p.realtor+'</span>':'')
+    +(p.desc?'<br><span style="color:#777;font-size:11px">'+p.desc+'</span>':'')
+    +'<hr style="margin:5px 0;border:none;border-top:1px solid #eee">'
+    +'<a href="'+nUrl+'" target="_blank" rel="noopener" style="display:inline-block;background:#03c75a;color:white;padding:4px 10px;border-radius:4px;font-size:11px;text-decoration:none;font-weight:bold">🔗 네이버 상세보기</a>'
+    +'<br><span style="font-size:10px;color:#bbb">매물 목록 탭의 ★ 체크 → 관심 등록</span>';
   d.onclick=function(e){{e.stopPropagation();}};
 
   // 아래 방향 화살표 (팝업 → 마커 연결)
@@ -301,8 +336,8 @@ else:
     st.sidebar.info("☁️ 클라우드 환경\n수집은 로컬 PC에서 실행 후\nGitHub에 push하면 자동 반영됩니다.")
 
 # ── 탭 ────────────────────────────────────────────────
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
-    ["📊 대시보드", "📋 매물 목록", "🗺️ 지도", "🤖 AI 분석", "⚙️ 설정"]
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+    ["📊 대시보드", "📋 매물 목록", "🗺️ 지도", "⭐ 관심 매물", "🤖 AI 분석", "⚙️ 설정"]
 )
 
 # ══════════════════════════════════════════════════════
@@ -412,7 +447,10 @@ with tab2:
         ascending = not sort_opts[sel_sort].startswith("-")
         df_f = df_f.sort_values(sort_col, ascending=ascending)
 
-        st.caption(f"필터 결과: {len(df_f)}건")
+        st.caption(f"필터 결과: {len(df_f)}건 &nbsp;|&nbsp; ★ 열 체크 → 관심 매물 등록")
+
+        # 관심 매물 상태 로드 (캐시 없이 항상 최신)
+        watched_nos_t2 = get_watched_nos()
 
         # 지하철 거리 계산 (카카오 API 우선 → 폴백 하드코딩)
         try:
@@ -453,18 +491,48 @@ with tab2:
             "first_seen": "수집일", "article_url": "매물링크",
         }
 
-        st.dataframe(
-            df_f[show_cols].rename(columns=rename_map),
-            column_config={
-                "매물링크": st.column_config.LinkColumn(
-                    "상세페이지",
-                    help="클릭하여 네이버 부동산 상세 보기",
-                    display_text="🔗 보기",
-                ),
-            },
+        # ★ 관심 열 + article_no 추가 (data_editor용)
+        df_edit = df_f.copy()
+        df_edit.insert(0, "★", df_edit["article_no"].isin(watched_nos_t2) if "article_no" in df_edit.columns else False)
+        edit_cols = ["★"] + show_cols + (["article_no"] if "article_no" in df_edit.columns else [])
+        edit_cols = [c for c in dict.fromkeys(edit_cols) if c in df_edit.columns]
+
+        col_cfg_t2 = {
+            "★": st.column_config.CheckboxColumn("★", help="체크 → 관심 매물 등록/해제", width="small"),
+            "article_no": st.column_config.TextColumn("매물ID", width="small"),
+            "article_url": st.column_config.LinkColumn("매물링크", display_text="🔗 보기"),
+        }
+        col_cfg_t2.update({k: st.column_config.TextColumn(v) for k, v in rename_map.items() if k in edit_cols})
+        disable_t2 = [c for c in edit_cols if c != "★"]
+
+        edited_t2 = st.data_editor(
+            df_edit[edit_cols],
+            column_config=col_cfg_t2,
+            disabled=disable_t2,
+            hide_index=True,
             use_container_width=True,
             height=450,
+            num_rows="fixed",
         )
+
+        # 관심 매물 변경 감지 및 저장
+        if "article_no" in edited_t2.columns:
+            _changed = False
+            for _, _row in edited_t2.iterrows():
+                _no = str(_row.get("article_no", ""))
+                if not _no:
+                    continue
+                _now_w = bool(_row.get("★", False))
+                _was_w = _no in watched_nos_t2
+                if _now_w and not _was_w:
+                    add_to_watchlist(_no)
+                    _changed = True
+                elif not _now_w and _was_w:
+                    remove_from_watchlist(_no)
+                    _changed = True
+            if _changed:
+                st.toast("관심 매물 목록이 업데이트됐습니다. ⭐")
+                st.rerun()
 
         # 엑셀 다운로드
         from io import BytesIO
@@ -559,19 +627,130 @@ with tab3:
                 show_bargain=show_bargain_map,
                 use_cluster=use_cluster,
                 show_subway=show_subway_map,
+                watched_nos=get_watched_nos(),
             )
             st.components.v1.html(map_html, height=590, scrolling=False)
 
         st.markdown(
-            "**마커 색상:** 🟢 **급**매(평균-15% 이하) &nbsp; 🔵 일반 매물 &nbsp; 🔴 고가(평균+10% 이상) &nbsp; 🟣 지하철역"
-            "  \n*지하철 출입구 번호(①②③…)는 카카오 지도 타일이 자동 표시 | 버스정류장도 타일에서 자동 표시*"
+            "**마커:** ⭐ 관심 매물(금별) &nbsp; 🟢 **급**매(평균-15% 이하) &nbsp; 🔵 일반 매물 &nbsp; 🔴 고가(평균+10% 이상) &nbsp; 🟣 지하철역"
+            "  \n*마커 클릭 → 상세 팝업 + 네이버 링크 | 관심 등록은 매물 목록 탭의 ★ 체크*"
         )
 
 
 # ══════════════════════════════════════════════════════
-# TAB 4: AI 분석
+# TAB 4: 관심 매물
 # ══════════════════════════════════════════════════════
 with tab4:
+    st.header("⭐ 관심 매물 추적")
+
+    wdf = get_watchlist_df()
+
+    if wdf.empty:
+        st.info("등록된 관심 매물이 없습니다. **매물 목록** 탭에서 ★ 열을 체크하면 여기에 추가됩니다.")
+    else:
+        active_w = int(wdf["is_active"].sum()) if "is_active" in wdf.columns else len(wdf)
+        inactive_w = len(wdf) - active_w
+
+        col_w1, col_w2, col_w3 = st.columns(3)
+        col_w1.metric("추적 중인 매물", f"{len(wdf)}건")
+        col_w2.metric("현재 매물 중", f"{active_w}건")
+        col_w3.metric("거래완료 추정", f"{inactive_w}건 🔴" if inactive_w else "0건")
+
+        st.divider()
+
+        for _, wrow in wdf.iterrows():
+            no = str(wrow.get("article_no", ""))
+            price = str(wrow.get("price_raw", "") or "")
+            type_n = str(wrow.get("type_name", "") or "")
+            trade_n = str(wrow.get("trade_name", "") or "")
+            building = str(wrow.get("building_name", "") or "")
+            is_active = bool(wrow.get("is_active", 1))
+            status = "🟢 매물 중" if is_active else "🔴 거래완료 추정"
+
+            title = f"{building or type_n} | {price} | {trade_n} | {status}"
+            with st.expander(f"⭐ {title}", expanded=False):
+                col_l, col_r = st.columns([1, 1])
+
+                with col_l:
+                    if building:
+                        st.markdown(f"**{building}**")
+                    st.markdown(f"**가격:** <span style='color:#e74c3c;font-size:16px'>{price}</span>", unsafe_allow_html=True)
+
+                    details = []
+                    area2 = wrow.get("area2")
+                    floor = str(wrow.get("floor_info", "") or "")
+                    direction = str(wrow.get("direction", "") or "")
+                    build_year = wrow.get("build_year")
+                    if area2: details.append(f"📐 전용 {area2}m²")
+                    if floor: details.append(f"🏢 {floor}층")
+                    if direction: details.append(f"↗ {direction}")
+                    if build_year: details.append(f"🔨 {build_year}년")
+                    if details:
+                        st.caption(" &nbsp; ".join(details))
+
+                    desc = str(wrow.get("description", "") or "")
+                    realtor = str(wrow.get("realtor_name", "") or "")
+                    added_at = str(wrow.get("added_at", ""))[:10]
+                    if desc:
+                        st.caption(desc)
+                    if realtor:
+                        st.caption(f"🏪 {realtor}")
+                    st.caption(f"관심 등록일: {added_at}")
+
+                    art_url = str(wrow.get("article_url", "") or "")
+                    naver_url = art_url if art_url else f"https://new.land.naver.com/houses?articleNo={no}"
+                    st.markdown(f"[🔗 네이버 상세보기]({naver_url})")
+
+                    st.divider()
+                    cur_memo = str(wrow.get("memo", "") or "")
+                    new_memo = st.text_area(
+                        "📝 메모", cur_memo, height=100, key=f"memo_{no}",
+                        placeholder="투자 검토 의견, 방문 일자, 협의 내용 등..."
+                    )
+                    col_s, col_d = st.columns(2)
+                    with col_s:
+                        if st.button("💾 메모 저장", key=f"save_{no}", use_container_width=True):
+                            update_watchlist_memo(no, new_memo)
+                            st.toast("메모 저장됨 ✓")
+                    with col_d:
+                        if st.button("🗑️ 관심 해제", key=f"rm_{no}", type="secondary", use_container_width=True):
+                            remove_from_watchlist(no)
+                            st.rerun()
+
+                with col_r:
+                    hist = load_price_history(no)
+                    if not hist.empty and "price_int" in hist.columns:
+                        hist_plot = hist[hist["price_int"] > 0].copy()
+                    else:
+                        hist_plot = pd.DataFrame()
+
+                    if hist_plot.empty:
+                        st.info("가격 이력 없음\n(수집 시작 이후 변동 없음)")
+                    else:
+                        type_labels = {"NEW": "신규", "UP": "↑상승", "DOWN": "↓하락", "DELETED": "삭제"}
+                        hist_plot["변동"] = hist_plot["change_type"].map(lambda x: type_labels.get(x, x))
+                        hist_plot["날짜"] = hist_plot["changed_at"].str[:10]
+
+                        fig_h = px.line(
+                            hist_plot, x="날짜", y="price_int",
+                            markers=True,
+                            title="가격 변동 이력",
+                            labels={"price_int": "가격(만원)", "날짜": ""},
+                            color_discrete_sequence=["#e74c3c"],
+                        )
+                        fig_h.update_layout(height=220, margin=dict(t=30, b=10, l=10, r=10))
+                        st.plotly_chart(fig_h, use_container_width=True)
+
+                        hist_tbl = hist_plot[["날짜", "price_raw", "변동", "change_amount"]].rename(
+                            columns={"price_raw": "가격", "change_amount": "변동액(만원)"}
+                        )
+                        st.dataframe(hist_tbl, use_container_width=True, height=130, hide_index=True)
+
+
+# ══════════════════════════════════════════════════════
+# TAB 5: AI 분석
+# ══════════════════════════════════════════════════════
+with tab5:
     st.header("🤖 Gemini AI 분석")
 
     analysis_type = st.radio(
@@ -604,9 +783,9 @@ with tab4:
 
 
 # ══════════════════════════════════════════════════════
-# TAB 5: 설정
+# TAB 6: 설정
 # ══════════════════════════════════════════════════════
-with tab5:
+with tab6:
     st.header("⚙️ 설정 및 실행 이력")
 
     # API 키 상태 패널
