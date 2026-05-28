@@ -145,6 +145,7 @@ def build_kakao_map(df, kakao_js_key,
     html = f"""<!DOCTYPE html>
 <html><head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
 <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey={kakao_js_key}&libraries=services,clusterer"></script>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
