@@ -28,7 +28,7 @@
 │      ▼                                   │
 │  database.py → data/realestate.db        │
 │      │                                   │
-│  부동산_수집_및_동기화.bat                  │
+│  realestate_daily.ps1 (PowerShell)       │
 │      │ git add / commit / push           │
 │      ▼                                   │
 │  GitHub (albert92kim/realestate-intel...) │
@@ -72,6 +72,10 @@ realestate/
 │   └── .gitkeep
 └── logs/
     └── collection.log  # 수집 로그 (gitignore 됨)
+
+바탕화면/
+├── collect_and_sync.bat    # Task Scheduler 진입점 (ASCII 이름, CRLF 안전)
+└── realestate_daily.ps1    # 실제 수집+push 로직 (PowerShell, Unicode 경로 지원)
 ```
 
 > `data/realestate.db`는 의도적으로 gitignore 하지 않습니다.  
@@ -139,6 +143,8 @@ GEMINI_API_KEY6=AIza...
    - 클라우드: `https://realestate-intelligence-aygy5yeh7wcraewk4op3hu.streamlit.app`
 3. `.env`에 `KAKAO_JS_KEY=<복사한 키>` 입력
 
+> **중요:** Streamlit Cloud는 HTTPS 서버이므로 Kakao Maps SDK가 내부적으로 로드하는 `http://t1.daumcdn.net/...` 리소스가 Mixed Content로 차단됩니다. `app.py`의 `build_kakao_map()`에 `<meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">` 태그가 이미 포함되어 이를 자동 해결합니다. **이 태그를 제거하면 클라우드에서 지도가 표시되지 않습니다.**
+
 ### Gemini API 키
 1. https://aistudio.google.com/app/apikey
 2. **Create API key** → 복사
@@ -188,13 +194,17 @@ SEARCH_CONFIGS = [
     │      URL: new.land.naver.com/api/articles
     │      조건: status=200, "clusters" 미포함
     │      파싱: articleList 배열, isMoreData 필드
-    └─ ④ 무한 스크롤 페이지네이션:
-           - 매물 리스트 컨테이너에 scrollTop = scrollHeight 주입
-           - isMoreData=False 또는 3회 연속 새 항목 없으면 종료
+    └─ ④ 페이지네이션:
+           - fvwqf 버튼 클릭(다음 페이지) 방식
+           - isMoreData=False 또는 버튼 없으면 종료
            - 최대 PLAYWRIGHT_MAX_PAGES(기본 20)회
 ```
 
 **수집 성능:** 조건당 수분 소요. 매물 400건 기준 약 3~5분.
+
+**수집 건수 관련 주의:** 매일 수집 결과가 동일한 건수(예: 400건)처럼 보여도 정상입니다.  
+신규 등록 27건 + 거래완료 삭제 27건이 같은 날 일어나면 총계는 같습니다.  
+실제 변동은 `price_history` 테이블(NEW/UP/DOWN/DELETED)에서 확인할 수 있습니다.
 
 ---
 
@@ -310,7 +320,7 @@ GEMINI_API_KEY2 = "AIza..."
 for _k, _v in _st.secrets.items():
     os.environ.setdefault(str(_k), str(_v))
 ```
-`config.py`는 `os.environ`에서 키를 읽으므로 로컬(`.env`)과 클라우드(st.secrets) 모두 동일하게 작동합니다.
+`config.py`는 `os.environ`에서 키를 읽으므로 로컬(`.env`)과 클라우드(`st.secrets`) 모두 동일하게 작동합니다.
 
 ---
 
@@ -322,26 +332,35 @@ for _k, _v in _st.secrets.items():
 - **실행 시각:** 매일 07:00
 - **실행 파일:** `C:\Users\Albert\Desktop\collect_and_sync.bat`
 
-### BAT 파일 구조
+### 스크립트 구조
 
 ```
 바탕화면/
-├── collect_and_sync.bat          # ASCII 이름 (Task Scheduler 호환)
-└── 부동산_수집_및_동기화.bat      # 실제 실행 스크립트
+├── collect_and_sync.bat    ← Task Scheduler가 실행하는 진입점 (ASCII 이름)
+└── realestate_daily.ps1    ← 실제 수집+push 로직 (PowerShell)
 ```
 
-`collect_and_sync.bat` → `부동산_수집_및_동기화.bat` 호출.  
-`부동산_수집_및_동기화.bat` 실행 흐름:
-
+`collect_and_sync.bat` 내용 (단 1줄):
+```batch
+@echo off
+powershell -ExecutionPolicy Bypass -File "C:\Users\Albert\Desktop\realestate_daily.ps1"
 ```
-[1/3] collector.py 실행 (수집)
+
+`realestate_daily.ps1` 실행 흐름:
+```
+[1/3] Python collector.py 실행 (수집)
    ↓ 성공
 [2/3] git add data\realestate.db → git commit → git push
    ↓ 성공
-[3/3] 완료 메시지 + pause (창 유지)
-실패 시: 오류 메시지 + pause (창 유지)
-로그: C:\Users\Albert\Desktop\부동산_수집_로그.txt
+[3/3] 완료 메시지
+실패 시: 오류 메시지 출력
+로그: C:\Users\Albert\Desktop\realestate_log.txt
 ```
+
+> **BAT 파일 인코딩 주의:** Windows cmd.exe는 CP949(EUC-KR)로 BAT 파일을 읽습니다.  
+> Write/Edit 도구가 생성한 파일은 UTF-8이므로, 한국어 경로가 포함된 BAT 파일은  
+> 문자 깨짐으로 실행 즉시 닫힙니다. 따라서 진입점은 ASCII 이름+내용의 BAT,  
+> 실제 로직은 Unicode를 완전 지원하는 PowerShell(.ps1)로 분리되어 있습니다.
 
 ### Task Scheduler 재등록 (필요 시)
 
@@ -401,21 +420,51 @@ python scheduler.py
 
 ## 트러블슈팅
 
-### 수집이 안 됨 (0건)
-- 네이버 부동산 URL이 유효한지 확인: 실제 브라우저에서 열어 매물이 보이는지 확인
-- `PLAYWRIGHT_WAIT_SEC` 값을 늘려보세요 (기본 5초 → 10초)
-- 네이버가 봇 감지 강화 시 `headless=False`로 전환해 테스트
+### 카카오 지도가 클라우드에서 안 보임 (Mixed Content)
 
-### 카카오 지도가 안 보임 (클라우드)
+**증상:** 로컬에서는 지도가 나오는데 Streamlit Cloud에서만 빈 화면  
+**원인:** Kakao Maps SDK가 내부적으로 `http://t1.daumcdn.net/...`(HTTP)을 로드하는데, HTTPS 페이지에서는 Mixed Content로 차단  
+**해결:** `app.py`의 `build_kakao_map()` HTML에 이 태그가 있어야 합니다:
+```html
+<meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
+```
+이 태그가 HTTP 요청을 HTTPS로 자동 업그레이드해 차단을 우회합니다.
+
+**DevTools에서 확인 방법 (F12 → Console):**
+```
+Mixed Content: ... requested an insecure script 'http://t1.daumcdn.net/...'
+```
+이 에러가 보이면 위 meta 태그를 추가하면 됩니다.
+
+### 카카오 지도 — 도메인 미등록 오류
+
+**증상:** `CATCH: kakao.maps.LatLng is not a constructor` 또는 SDK 로드 실패  
+**해결 순서:**
 1. Streamlit Cloud Secrets에 `KAKAO_JS_KEY` 등록 여부 확인
-2. Kakao 개발자 콘솔 → 플랫폼 → Web에 Streamlit Cloud URL 등록 여부 확인
-3. 등록 URL: `https://realestate-intelligence-aygy5yeh7wcraewk4op3hu.streamlit.app`
+2. Kakao 개발자 콘솔 → 플랫폼 → Web에 도메인 등록:
+   - `http://localhost:8501`
+   - `https://realestate-intelligence-aygy5yeh7wcraewk4op3hu.streamlit.app`
 
 ### 지하철역이 잘못된 위치에 표시
+
 `app.py`의 `build_kakao_map()`이 `Places.categorySearch('SW8')`를 사용하는지 확인.  
 카카오 REST API 좌표를 JS 지도에 직접 찍으면 위치 오류 발생 (카카오 내부 DB 불일치).
 
+### BAT 파일 실행 즉시 닫힘
+
+한국어 경로가 포함된 BAT을 UTF-8로 저장하면 CP949 디코딩 실패로 즉시 종료됩니다.  
+**해결:** 진입점 BAT은 ASCII만 사용, 실제 로직은 PowerShell(.ps1)로 분리합니다.  
+현재 설정: `collect_and_sync.bat` → `realestate_daily.ps1` 구조로 이미 해결됨.
+
+로그 확인: `C:\Users\Albert\Desktop\realestate_log.txt`
+
+### 수집 건수가 매일 같음 (예: 400건)
+
+**정상 동작입니다.** 시장에서 신규 등록과 거래완료가 비슷한 수로 발생하면 총 활성 매물 수는 유지됩니다.  
+실제 변동 내역은 `price_history` 테이블의 `change_type`(NEW/UP/DOWN/DELETED)로 확인하세요.
+
 ### git push 403 / Permission denied
+
 ```powershell
 # 자격 증명 초기화
 cmdkey /delete:git:https://github.com
@@ -428,11 +477,20 @@ git config user.name "albert92kim"
 git config user.email "klitpub88@gmail.com"
 ```
 
-### BAT 파일 실행 즉시 닫힘
-- 로그 파일 확인: `C:\Users\Albert\Desktop\부동산_수집_로그.txt`
-- Python 경로 확인: `"C:\Program Files\Python313\python.exe"` 존재 여부
+### git push 후 "nothing to commit"
+
+`data/realestate.db`의 수정 시각이 이전 commit 이후와 같으면 git이 변경으로 인식하지 않습니다.  
+collector.py가 실제로 DB를 업데이트했다면 git이 diff를 감지합니다 (SQLite delete journal 모드 사용 중).  
+수집이 정상 실행됐는지 로그(`realestate_log.txt`)를 확인하세요.
+
+### 수집이 안 됨 (0건)
+
+- 네이버 부동산 URL이 유효한지 확인: 실제 브라우저에서 열어 매물이 보이는지 확인
+- `PLAYWRIGHT_WAIT_SEC` 값을 늘려보세요 (기본 5초 → 10초)
+- 네이버가 봇 감지 강화 시 `headless=False`로 전환해 테스트
 
 ### Streamlit Cloud에서 SQLite 데이터 없음
+
 클라우드는 DB를 직접 수정하지 않습니다. 로컬에서 수집 후 push가 필요합니다:
 ```powershell
 python collector.py
@@ -464,3 +522,14 @@ git push
 | GitHub 저장소 | `albert92kim/realestate-intelligence` |
 | Streamlit Cloud | https://share.streamlit.io (albert92kim 계정) |
 | 수집 PC | Windows 11, `C:\Users\Albert\AI스크래핑\realestate\` |
+
+---
+
+## 주요 변경 이력
+
+| 날짜 | 변경 내용 |
+|------|-----------|
+| 2026-05-28 | **카카오 지도 Mixed Content 수정** — `upgrade-insecure-requests` CSP 메타 태그 추가. Streamlit Cloud(HTTPS)에서 Kakao SDK 서브 스크립트(HTTP)가 차단되는 문제 해결 |
+| 2026-05-28 | **BAT 파일 인코딩 수정** — 한국어 경로가 포함된 BAT의 CP949/UTF-8 불일치 문제 해결. `collect_and_sync.bat`(ASCII 진입점) → `realestate_daily.ps1`(PowerShell) 구조로 변경 |
+| 2026-05-28 | 수집 페이지네이션 방식 변경: `window.scrollTo` → `fvwqf 버튼 클릭` |
+| 2026-05-28 | 수집 방식 변경: curl_cffi → Playwright 브라우저 인터셉트 |
