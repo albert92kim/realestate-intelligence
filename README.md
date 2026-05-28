@@ -237,6 +237,15 @@ SEARCH_CONFIGS = [
 
 날짜 × 법정동 × 건물유형 × 거래유형 조합으로 일별 평균·중위·최소·최대 가격 저장.
 
+### `watchlist` — 관심 매물
+
+| 컬럼 | 타입 | 설명 |
+|------|------|------|
+| `article_no` | TEXT PK | properties FK |
+| `memo` | TEXT | 사용자 메모 |
+| `added_at` | TEXT | 등록 일시 |
+| `updated_at` | TEXT | 마지막 수정 일시 |
+
 ### `collection_runs` — 수집 실행 기록
 
 각 수집 실행마다 총건수·신규·변경·삭제 및 소요시간 기록.
@@ -247,11 +256,53 @@ SEARCH_CONFIGS = [
 
 | 탭 | 기능 |
 |----|------|
-| **매물 목록** | 필터(건물유형·거래유형·가격범위·급매) + 지하철 거리 표 + 가격 분포 히스토그램 |
-| **시장 동향** | 일별 평균가 추이 차트, 신규/삭제 건수 |
-| **지도** | 카카오 지도 JS SDK — 매물 마커(색상: 🔴고가/🔵일반/🟢급매), 클러스터링, 지하철역 오버레이 |
-| **AI 분석** | Gemini API로 선택 매물 또는 시장 전체 요약 |
-| **수집 현황** | 수집 실행 기록, 오류 로그, 수동 수집 버튼(로컬 전용) |
+| **📊 대시보드** | KPI(총 매물·평균가·신규·급매) + 30일 추이 차트 + 가격 분포·유형 파이 |
+| **📋 매물 목록** | 필터(유형·가격범위·급매) + ★ 관심 등록 체크박스 + 지하철 거리 표 + 엑셀 다운로드 |
+| **🗺️ 지도** | 카카오 지도 JS SDK — 매물 마커(⭐관심/🔵일반/🟢급매/🔴고가), 클러스터링, 지하철역 |
+| **⭐ 관심 매물** | 추적 매물 목록 + 메모 편집 + 가격 이력 차트 + 관심 해제 |
+| **🤖 AI 분석** | Gemini API — 급매 감지·시장 동향·키워드 분석 |
+| **⚙️ 설정** | API 키 상태, 수집 조건 목록, 실행 이력 |
+
+### 지도 팝업 기능
+
+마커 클릭 시 팝업에 표시되는 내용:
+- 건물명, 유형·거래, 가격
+- **평당 단가**: 전용면적 기준 만원/평 · 공급면적 기준 만원/평 (1평 = 3.3058m²)
+- 면적: m² 와 평 **병기** (예: `28.0m² (8.5평)`)
+- 층·방향·건축연도·중개사·특이사항
+- **🔗 네이버 상세보기** 버튼 (새 탭으로 직접 이동)
+- **☆ 관심 등록 / ⭐ 관심 해제** 버튼 (즉시 반영)
+- **📝 메모** 버튼 (관심 매물에만 표시, 브라우저 prompt로 입력)
+
+> **구현 기술**: `st.components.v1.html()` 의 srcdoc iframe은 `sandbox="allow-scripts allow-same-origin"` 으로  
+> `target="_blank"` 및 `window.open()` 이 차단됩니다. `allow-same-origin` 특성으로 `window.top` 접근이 허용되므로  
+> 모든 버튼은 `window.top.open()` / `window.top.location.href` 를 통해 동작합니다.  
+> 관심 등록/메모는 query parameter (`?watchToggle=`, `?watchMemo=`) → Streamlit `st.query_params` → DB 저장 흐름입니다.
+
+### 관심 매물 추적 시스템
+
+```
+[지도 팝업] ☆ 관심 등록 클릭
+    │ window.top.location.href = '...?watchToggle=article_no'
+    ▼
+[Streamlit 상단] st.query_params.get('watchToggle')
+    │ add_to_watchlist(article_no) 또는 remove_from_watchlist(article_no)
+    │ del st.query_params['watchToggle']
+    ▼
+[재렌더링] 지도에 ⭐ 금별 마커 표시 + 관심 매물 탭에 추가
+
+[지도 팝업] 📝 메모 클릭
+    │ window.top.prompt() → 입력값
+    │ window.top.location.href = '...?watchMemo=no:encodeURIComponent(memo)'
+    ▼
+[Streamlit 상단] st.query_params.get('watchMemo') → update_watchlist_memo()
+```
+
+### 급매 판정 기준 (`config.py`)
+
+```python
+BARGAIN_THRESHOLD = 0.15  # 평균 대비 15% 이하 → 급매 (초록 마커 + "급" 레이블)
+```
 
 ### 급매 판정 기준 (`config.py`)
 
@@ -529,6 +580,8 @@ git push
 
 | 날짜 | 변경 내용 |
 |------|-----------|
+| 2026-05-28 | **지도 팝업 개선** — 평당 단가(전용/공급 각각), 면적 m²+평 병기, 네이버 상세 링크(window.top.open), 관심 등록/해제 버튼, 메모 입력 버튼(window.top.prompt) |
+| 2026-05-28 | **관심 매물 추적 시스템** — watchlist 테이블 추가, 매물 목록 ★ 체크박스, 관심 매물 탭(메모·가격이력·관심해제), 지도 ⭐ 금별 마커, query param 통신 |
 | 2026-05-28 | **카카오 지도 Mixed Content 수정** — `upgrade-insecure-requests` CSP 메타 태그 추가. Streamlit Cloud(HTTPS)에서 Kakao SDK 서브 스크립트(HTTP)가 차단되는 문제 해결 |
 | 2026-05-28 | **BAT 파일 인코딩 수정** — 한국어 경로가 포함된 BAT의 CP949/UTF-8 불일치 문제 해결. `collect_and_sync.bat`(ASCII 진입점) → `realestate_daily.ps1`(PowerShell) 구조로 변경 |
 | 2026-05-28 | 수집 페이지네이션 방식 변경: `window.scrollTo` → `fvwqf 버튼 클릭` |
