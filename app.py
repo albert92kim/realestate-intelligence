@@ -6,6 +6,7 @@
 import sys, os, json
 from pathlib import Path
 from datetime import datetime, date
+from urllib.parse import unquote
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -43,6 +44,27 @@ st.set_page_config(
 
 # ── DB 초기화 ──────────────────────────────────────────
 init_db()
+
+# ── 지도 팝업 → Streamlit 관심/메모 통신 (query param 방식) ──
+_wt = st.query_params.get("watchToggle", "")
+if _wt:
+    _wns = get_watched_nos()
+    if _wt in _wns:
+        remove_from_watchlist(_wt)
+        st.toast(f"관심 해제됐습니다.")
+    else:
+        add_to_watchlist(_wt)
+        st.toast(f"관심 매물로 등록됐습니다. ⭐")
+    del st.query_params["watchToggle"]
+    st.rerun()
+
+_wm = st.query_params.get("watchMemo", "")
+if _wm and ":" in _wm:
+    _wm_no, _wm_memo = _wm.split(":", 1)
+    update_watchlist_memo(_wm_no, unquote(_wm_memo))
+    st.toast("메모가 저장됐습니다. 📝")
+    del st.query_params["watchMemo"]
+    st.rerun()
 
 
 # ── 공통 데이터 로드 ───────────────────────────────────
@@ -109,6 +131,15 @@ def build_kakao_map(df, kakao_js_key,
     import json as _json
     if watched_nos is None:
         watched_nos = set()
+    watched_memos = {}
+    if watched_nos:
+        try:
+            _wdf_m = get_watchlist_df()
+            if not _wdf_m.empty:
+                for _, _wr_m in _wdf_m.iterrows():
+                    watched_memos[str(_wr_m.get("article_no", ""))] = str(_wr_m.get("memo", "") or "")
+        except Exception:
+            pass
 
     props = []
     for _, row in df.iterrows():
@@ -146,6 +177,8 @@ def build_kakao_map(df, kakao_js_key,
             "realtor": _s(row.get("realtor_name")),
             "desc": _s(row.get("description")),
             "article_url": _s(row.get("article_url")),
+            "price_int": int(row.get("price_int") or 0),
+            "memo": watched_memos.get(str(row.get("article_no", "")), ""),
             "color": color, "label": label,
             "watched": row.get("article_no") in watched_nos,
         })
@@ -215,26 +248,48 @@ props.forEach(function(p){{
   wrap.style.cssText='display:inline-block;text-align:center';
 
   var d=document.createElement('div');
-  d.style.cssText='background:white;border:1px solid #ddd;border-radius:8px;padding:10px 14px 10px 12px;font-size:12px;line-height:1.7;box-shadow:0 2px 8px rgba(0,0,0,.15);min-width:220px;max-width:290px;position:relative;text-align:left';
-  var nUrl=p.article_url||('https://new.land.naver.com/houses?articleNo='+p.no);
+  d.style.cssText='background:white;border:1px solid #ddd;border-radius:8px;padding:10px 14px 10px 12px;font-size:12px;line-height:1.7;box-shadow:0 2px 8px rgba(0,0,0,.15);min-width:230px;max-width:310px;position:relative;text-align:left';
+  var _nUrl=p.article_url||('https://m.land.naver.com/article/view/'+p.no);
+  var _a2=parseFloat(p.area2)||0,_a1=parseFloat(p.area1)||0,_pI=parseInt(p.price_int)||0;
+  var _py2=_a2>0?Math.round(_a2/3.3058*10)/10:0,_py1=_a1>0?Math.round(_a1/3.3058*10)/10:0;
+  var _pp2=_py2>0&&_pI>0?Math.round(_pI/_py2).toLocaleString():'',_pp1=_py1>0&&_pI>0?Math.round(_pI/_py1).toLocaleString():'';
   d.innerHTML=
-    (p.watched?'<div style="background:#FFD700;color:#5a4000;border-radius:3px;padding:1px 6px;font-size:10px;margin-bottom:4px;display:inline-block;font-weight:bold">⭐ 관심 매물</div><br>':'')
+    (p.watched?'<div style="background:#FFD700;color:#5a4000;border-radius:3px;padding:1px 6px;font-size:10px;margin-bottom:4px;display:inline-block;font-weight:bold">⭐ 관심 매물</div>'+(p.memo?'<span style="color:#777;font-size:10px"> '+p.memo.slice(0,18)+(p.memo.length>18?'…':'')+'</span>':'')+'<br>':'')
     +'<span style="position:absolute;top:4px;right:8px;cursor:pointer;font-size:16px;color:#aaa" onclick="(function(e){{e.stopPropagation();if(window._kOpen){{window._kOpen.setMap(null);window._kOpen=null;}}}})()">×</span>'
     +(p.building?'<b style="font-size:13px">'+p.building+'</b><br>':'')
     +'<span style="color:#888;font-size:11px">'+p.type_name+' · '+p.trade_name+'</span><br>'
-    +'<span style="color:#e74c3c;font-weight:bold;font-size:15px">'+p.price+'</span>'
+    +'<span style="color:#e74c3c;font-weight:bold;font-size:15px">'+p.price+'</span><br>'
+    +(_pp2?'<span style="color:#c0392b;font-size:10px">전용 '+_pp2+'만원/평'+(_pp1?' &nbsp;|&nbsp; 공급 '+_pp1+'만원/평':'')+'</span>':'')
     +'<hr style="margin:5px 0;border:none;border-top:1px solid #eee">'
-    +'<span style="color:#555;font-size:11px">'
-    +(p.area2?'📐 '+p.area2+'m²':'')
-    +(p.floor?' &nbsp;🏢 '+p.floor+'층':'')
-    +(p.direction?' &nbsp;↗ '+p.direction:'')
-    +'</span>'
+    +(_a2>0?'<span style="color:#555;font-size:11px">📐 전용 '+p.area2+'m²'+(_py2?' ('+_py2+'평)':'')+'</span>':'')
+    +(_a1>0?'<span style="color:#555;font-size:11px"> &nbsp; 공급 '+p.area1+'m²'+(_py1?' ('+_py1+'평)':'')+'</span>':'')
+    +(p.floor?'<br><span style="color:#555;font-size:11px">🏢 '+p.floor+'층'+(p.direction?' &nbsp;↗ '+p.direction:'')+'</span>':'')
     +(p.build_year?'<br><span style="color:#777;font-size:11px">🔨 '+p.build_year+'년 건축</span>':'')
     +(p.realtor?'<br><span style="color:#aaa;font-size:10px">🏪 '+p.realtor+'</span>':'')
     +(p.desc?'<br><span style="color:#777;font-size:11px">'+p.desc+'</span>':'')
-    +'<hr style="margin:5px 0;border:none;border-top:1px solid #eee">'
-    +'<a href="'+nUrl+'" target="_blank" rel="noopener" style="display:inline-block;background:#03c75a;color:white;padding:4px 10px;border-radius:4px;font-size:11px;text-decoration:none;font-weight:bold">🔗 네이버 상세보기</a>'
-    +'<br><span style="font-size:10px;color:#bbb">매물 목록 탭의 ★ 체크 → 관심 등록</span>';
+    +'<hr style="margin:5px 0;border:none;border-top:1px solid #eee">';
+  // 버튼은 DOM으로 생성 — sandbox allow-same-origin + window.top으로 iframe 제한 우회
+  var _br=document.createElement('div');
+  _br.style.cssText='display:flex;gap:5px;flex-wrap:wrap;align-items:center';
+  var _na=document.createElement('a');
+  _na.href='javascript:void(0)';
+  _na.style.cssText='display:inline-block;background:#03c75a;color:white;padding:4px 10px;border-radius:4px;font-size:11px;text-decoration:none;font-weight:bold;cursor:pointer';
+  _na.textContent='🔗 네이버 상세보기';
+  (function(u){{_na.addEventListener('click',function(e){{e.stopPropagation();(window.top||window).open(u,'_blank');}})}}(_nUrl));
+  var _wb=document.createElement('button');
+  _wb.style.cssText='padding:4px 8px;border-radius:4px;font-size:11px;cursor:pointer;border:1px solid '+(p.watched?'#ccc':'#f0a500')+';background:'+(p.watched?'#f5f5f5':'#fffbe6')+';color:'+(p.watched?'#888':'#5a4000');
+  _wb.textContent=p.watched?'⭐ 관심 해제':'☆ 관심 등록';
+  (function(no){{_wb.addEventListener('click',function(e){{e.stopPropagation();window.top.location.href=window.top.location.href.split('?')[0]+'?watchToggle='+no;}})}}(p.no));
+  _br.appendChild(_na);
+  _br.appendChild(_wb);
+  if(p.watched){{
+    var _mb=document.createElement('button');
+    _mb.style.cssText='padding:4px 8px;border-radius:4px;font-size:11px;cursor:pointer;border:1px solid #ddd;background:#fafafa';
+    _mb.textContent='📝 메모';
+    (function(no,cm){{_mb.addEventListener('click',function(e){{e.stopPropagation();var nm=(window.top||window).prompt('메모 입력:',cm||'');if(nm!==null){{window.top.location.href=window.top.location.href.split('?')[0]+'?watchMemo='+no+':'+encodeURIComponent(nm);}}}})}}(p.no,p.memo||''));
+    _br.appendChild(_mb);
+  }}
+  d.appendChild(_br);
   d.onclick=function(e){{e.stopPropagation();}};
 
   // 아래 방향 화살표 (팝업 → 마커 연결)
