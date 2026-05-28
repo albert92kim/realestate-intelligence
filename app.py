@@ -213,7 +213,8 @@ map.addControl(new kakao.maps.ZoomControl(),kakao.maps.ControlPosition.RIGHT);
 map.addControl(new kakao.maps.MapTypeControl(),kakao.maps.ControlPosition.TOPRIGHT);
 
 var _open=null;
-function closeInfo(){{if(_open){{_open.setMap(null);_open=null;}}}}
+function closeInfo(){{if(_open){{_open.setMap(null);_open=null;window._kOpen=null;}}}}
+window._closeInfo=closeInfo;
 kakao.maps.event.addListener(map,'click',closeInfo);
 
 function makeSVG(color,label){{
@@ -230,6 +231,8 @@ function makeStarSVG(){{
     +'</svg>';
   return 'data:image/svg+xml;charset=UTF-8,'+encodeURIComponent(s);
 }}
+window._topOpen=function(u){{try{{var a=(window.top||window).document.createElement('a');a.href=u;a.target='_blank';a.rel='noopener noreferrer';(window.top||window).document.body.appendChild(a);a.click();(window.top||window).document.body.removeChild(a);}}catch(ex){{console.error('topOpen:',ex);}}}};
+window._topGo=function(u){{try{{var a=(window.top||window).document.createElement('a');a.href=u;(window.top||window).document.body.appendChild(a);a.click();(window.top||window).document.body.removeChild(a);}}catch(ex){{console.error('topGo:',ex);}}}};
 
 // ── 매물 마커 ──────────────────────────────────────────
 var props={props_json};
@@ -255,7 +258,7 @@ props.forEach(function(p){{
   var _pp2=_py2>0&&_pI>0?Math.round(_pI/_py2).toLocaleString():'',_pp1=_py1>0&&_pI>0?Math.round(_pI/_py1).toLocaleString():'';
   d.innerHTML=
     (p.watched?'<div style="background:#FFD700;color:#5a4000;border-radius:3px;padding:1px 6px;font-size:10px;margin-bottom:4px;display:inline-block;font-weight:bold">⭐ 관심 매물</div>'+(p.memo?'<span style="color:#777;font-size:10px"> '+p.memo.slice(0,18)+(p.memo.length>18?'…':'')+'</span>':'')+'<br>':'')
-    +'<span style="position:absolute;top:4px;right:8px;cursor:pointer;font-size:16px;color:#aaa" onclick="(function(e){{e.stopPropagation();if(window._kOpen){{window._kOpen.setMap(null);window._kOpen=null;}}}})()">×</span>'
+    +'<span style="position:absolute;top:4px;right:8px;cursor:pointer;font-size:16px;color:#aaa" onclick="if(window._closeInfo){{window._closeInfo();}}">×</span>'
     +(p.building?'<b style="font-size:13px">'+p.building+'</b><br>':'')
     +'<span style="color:#888;font-size:11px">'+p.type_name+' · '+p.trade_name+'</span><br>'
     +'<span style="color:#e74c3c;font-weight:bold;font-size:15px">'+p.price+'</span><br>'
@@ -275,18 +278,18 @@ props.forEach(function(p){{
   _na.href='javascript:void(0)';
   _na.style.cssText='display:inline-block;background:#03c75a;color:white;padding:4px 10px;border-radius:4px;font-size:11px;text-decoration:none;font-weight:bold;cursor:pointer';
   _na.textContent='🔗 네이버 상세보기';
-  (function(u){{_na.addEventListener('click',function(e){{e.stopPropagation();(window.top||window).open(u,'_blank');}})}}(_nUrl));
+  _na.addEventListener('click',function(e){{e.stopPropagation();window._topOpen(_nUrl);}});
   var _wb=document.createElement('button');
   _wb.style.cssText='padding:4px 8px;border-radius:4px;font-size:11px;cursor:pointer;border:1px solid '+(p.watched?'#ccc':'#f0a500')+';background:'+(p.watched?'#f5f5f5':'#fffbe6')+';color:'+(p.watched?'#888':'#5a4000');
   _wb.textContent=p.watched?'⭐ 관심 해제':'☆ 관심 등록';
-  (function(no){{_wb.addEventListener('click',function(e){{e.stopPropagation();window.top.location.href=window.top.location.href.split('?')[0]+'?watchToggle='+no;}})}}(p.no));
+  (function(no){{_wb.addEventListener('click',function(e){{e.stopPropagation();window._topGo((window.top||window).location.href.split('?')[0]+'?watchToggle='+no);}})}}(p.no));
   _br.appendChild(_na);
   _br.appendChild(_wb);
   if(p.watched){{
     var _mb=document.createElement('button');
     _mb.style.cssText='padding:4px 8px;border-radius:4px;font-size:11px;cursor:pointer;border:1px solid #ddd;background:#fafafa';
     _mb.textContent='📝 메모';
-    (function(no,cm){{_mb.addEventListener('click',function(e){{e.stopPropagation();var nm=(window.top||window).prompt('메모 입력:',cm||'');if(nm!==null){{window.top.location.href=window.top.location.href.split('?')[0]+'?watchMemo='+no+':'+encodeURIComponent(nm);}}}})}}(p.no,p.memo||''));
+    (function(no,cm){{_mb.addEventListener('click',function(e){{e.stopPropagation();var nm=(window.top||window).prompt('메모 입력:',cm||'');if(nm!==null){{window._topGo((window.top||window).location.href.split('?')[0]+'?watchMemo='+no+':'+encodeURIComponent(nm));}}}})}}(p.no,p.memo||''));
     _br.appendChild(_mb);
   }}
   d.appendChild(_br);
